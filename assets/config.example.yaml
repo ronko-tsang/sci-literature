@@ -46,3 +46,35 @@ processing:
 storage:
   # Output directory for extracted data
   extracted_dir: "./extracted"
+
+# Embedding Configuration (for semantic search / RAG)
+embedding:
+  # Enable embedding-based retrieval for 'ask' command
+  enabled: true
+
+  # Embedding provider: openai | minimax | zhipu | deepseek | tongyi | moonshot
+  # Note: OpenAI uses text-embedding-3-small by default, compatible with OpenAI API format
+  provider: "minimax"
+
+  # Embedding model name
+  # MiniMax: embo-01 (1536 dim, recommended)
+  # Zhipu: embedding-2 (1536 dim)
+  # DeepSeek: text-embedding-3 (1536 dim)
+  # Tongyi: text-embedding-v1 (1536 dim)
+  # Moonshot: moonshot-embedding-v1 (1536 dim)
+  # OpenAI: text-embedding-3-small (1536 dim)
+  model: "embo-01"
+
+  # API endpoint (uses same base_url as api section if not specified)
+  # Set explicitly if embedding endpoint differs from chat endpoint
+  base_url: ""
+
+  # Embedding dimension (auto-detected from API response if 0)
+  dimension: 0
+
+  # Batch size for embedding computation
+  batch_size: 16
+
+  # Text truncation for embedding input (chars)
+  # Keep short for accuracy: claim-level chunks work better than full paper
+  max_chars: 2000

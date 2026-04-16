@@ -3,3 +3,4 @@ click
 pyyaml
 tqdm
 requests
+numpy

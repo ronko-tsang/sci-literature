@@ -5,6 +5,7 @@ SCI Literature Deep-Read Toolkit for Biomedical Research v4.0
 A professional-grade SCI paper analysis toolkit for biomedical literature,
 with bioinformatics depth, statistical rigor, and cross-paper synthesis.
 """
+
 import os
 import sys
 import json
@@ -79,6 +80,40 @@ API_PROVIDERS = {
 }
 
 
+EMBEDDING_PROVIDERS = {
+    "minimax": {
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "embo-01",
+        "description": "MiniMax Embedding",
+    },
+    "zhipu": {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+        "model": "embedding-2",
+        "description": "Zhipu Embedding",
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "text-embedding-3",
+        "description": "DeepSeek Embedding",
+    },
+    "tongyi": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "text-embedding-v1",
+        "description": "Tongyi Embedding",
+    },
+    "moonshot": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "moonshot-embedding-v1",
+        "description": "Moonshot Embedding",
+    },
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "model": "text-embedding-3-small",
+        "description": "OpenAI Embedding",
+    },
+}
+
+
 def load_config() -> dict:
     """Load configuration from config.yaml or config.example.yaml."""
     skill_root = Path(__file__).parent.parent
@@ -112,9 +147,170 @@ def get_llm_config(config: dict) -> dict:
     }
 
 
+def get_embedding_config(config: dict) -> dict:
+    """Get embedding configuration from config dict."""
+    emb_cfg = config.get("embedding", {})
+    if not emb_cfg.get("enabled", False):
+        return {"enabled": False}
+
+    provider = emb_cfg.get("provider", "minimax")
+    api_key = config.get("api", {}).get("api_key", "")
+    base_url = emb_cfg.get("base_url", "")
+    model = emb_cfg.get("model", "")
+    dimension = emb_cfg.get("dimension", 0)
+
+    provider_config = EMBEDDING_PROVIDERS.get(provider, EMBEDDING_PROVIDERS["minimax"])
+    base_url = (
+        base_url
+        or provider_config["base_url"]
+        or config.get("api", {}).get("base_url", "")
+    )
+    model = model or provider_config["model"]
+
+    if not api_key:
+        log(
+            "    WARNING: No API key for embedding, falling back to non-embedding search"
+        )
+        return {"enabled": False}
+
+    return {
+        "enabled": True,
+        "api_key": api_key,
+        "base_url": base_url,
+        "model": model,
+        "provider": provider,
+        "provider_description": provider_config["description"],
+        "dimension": dimension,
+        "batch_size": emb_cfg.get("batch_size", 16),
+        "max_chars": emb_cfg.get("max_chars", 2000),
+    }
+
+
 # =============================================================================
 # LLM API Calls
 # =============================================================================
+
+
+def cosine_similarity(vec_a: list, vec_b: list) -> float:
+    """Compute cosine similarity between two vectors."""
+    import math
+
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a))
+    norm_b = math.sqrt(sum(b * b for b in vec_b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def call_embedding_api(config: dict, texts: list) -> list:
+    """
+    Call embedding API for a list of texts.
+    Returns a list of embedding vectors.
+    """
+    cfg = get_embedding_config(config)
+    if not cfg.get("enabled"):
+        return []
+
+    api_key = cfg["api_key"]
+    base_url = cfg["base_url"]
+    model = cfg["model"]
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    data = {
+        "model": model,
+        "input": texts,
+    }
+
+    try:
+        debug(
+            f"    [Embedding] Provider: {cfg['provider']} ({cfg['provider_description']})"
+        )
+        debug(f"    [Embedding] Model: {model}")
+        debug(f"    [Embedding] Texts: {len(texts)}")
+
+        response = requests.post(
+            f"{base_url}/embeddings",
+            headers=headers,
+            json=data,
+            timeout=60,
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            if "data" not in result or not result["data"]:
+                log(f"    Embedding API Error: unexpected response format (no data)")
+                return []
+            embeddings = [item["embedding"] for item in result["data"]]
+            debug(
+                f"    [Embedding] Success, dim: {len(embeddings[0]) if embeddings else 0}"
+            )
+            return embeddings
+        elif response.status_code == 401:
+            log(f"    Embedding API Error [401]: Invalid or expired API key")
+            return []
+        elif response.status_code == 429:
+            log(f"    Embedding API Error [429]: Rate limited")
+            return []
+        else:
+            log(
+                f"    Embedding API Error: {response.status_code} - {response.text[:200]}"
+            )
+            return []
+
+    except requests.exceptions.Timeout:
+        log(f"    Embedding request timeout")
+        return []
+    except requests.exceptions.ConnectionError:
+        log(f"    Embedding connection failed")
+        return []
+    except Exception as e:
+        log(f"    Embedding request failed: {e}")
+        return []
+
+
+def compute_paper_embedding(config: dict, paper: dict, max_chars: int = 2000) -> list:
+    """
+    Compute embedding for a paper's content.
+    Uses title + findings + methods as the semantic representation.
+    """
+    text_parts = []
+
+    title = paper.get("title", "")
+    if title:
+        text_parts.append(f"Title: {title}")
+
+    conclusion = paper.get("conclusion", {})
+    findings = conclusion.get("main_findings", [])
+    if findings:
+        findings_text = "; ".join(findings[:5])
+        text_parts.append(f"Findings: {findings_text}")
+
+    method = paper.get("method", {})
+    method_text = method.get("research_method", "")
+    approach = method.get("approach_type", "")
+    if method_text:
+        text_parts.append(f"Method: {method_text}")
+    if approach and approach != method_text:
+        text_parts.append(f"Approach: {approach}")
+
+    limitation = paper.get("limitation", {})
+    limitations = limitation.get("limitations", [])
+    if limitations:
+        text_parts.append(f"Limitations: {'; '.join(limitations[:3])}")
+
+    combined_text = " | ".join(text_parts)
+
+    if len(combined_text) > max_chars:
+        combined_text = combined_text[:max_chars]
+
+    embeddings = call_embedding_api(config, [combined_text])
+    return embeddings[0] if embeddings else []
+
 
 def call_llm(
     config: dict, prompt: str, temperature: float = 0.1, max_tokens: int = 8000
@@ -153,10 +349,7 @@ def call_llm(
             result = response.json()
             content = result["choices"][0]["message"]["content"]
             if "</think>" in content:
-                parts = content.split("
-</think>
-
-")
+                parts = content.split("</think>\n\n</think>\n\n")
                 content = parts[-1].strip()
             return content
         elif response.status_code == 401:
@@ -270,7 +463,10 @@ def call_llm_json(config: dict, prompt: str) -> dict:
     objects = extract_json_objects(text)
     if objects:
         for obj in objects:
-            if any(k in obj for k in ("method", "conclusion", "limitation", "bioinformatics")):
+            if any(
+                k in obj
+                for k in ("method", "conclusion", "limitation", "bioinformatics")
+            ):
                 debug(f"    Successfully extracted partial JSON object")
                 return obj
 
@@ -281,6 +477,7 @@ def call_llm_json(config: dict, prompt: str) -> dict:
 # =============================================================================
 # PDF Processing
 # =============================================================================
+
 
 def extract_text(pdf_path: str) -> str:
     """Extract text content from PDF using PyMuPDF."""
@@ -304,7 +501,7 @@ def extract_metadata(pdf_path: str) -> dict:
 
     # Try to extract year from subject (sometimes contains "2024")
     year = None
-    year_match = re.search(r'\b(19|20)\d{2}\b', subject)
+    year_match = re.search(r"\b(19|20)\d{2}\b", subject)
     if year_match:
         year = int(year_match.group())
 
@@ -316,7 +513,7 @@ def extract_metadata(pdf_path: str) -> dict:
     authors = []
     if author:
         # Split by common delimiters
-        parts = re.split(r'[,;]|\band\b', author)
+        parts = re.split(r"[,;]|\band\b", author)
         authors = [a.strip() for a in parts if a.strip()]
 
     return {
@@ -368,9 +565,7 @@ def extract_paper_info(config: dict, pdf_path: str, delay: float = 1.0) -> dict:
                 return None
 
             bib_key = generate_bib_key(
-                metadata["title"],
-                metadata["authors"],
-                metadata["year"]
+                metadata["title"], metadata["authors"], metadata["year"]
             )
 
             # Domain-specific extraction prompt for biomedical/bioinformatics research
@@ -456,7 +651,7 @@ Requirements:
             if "main_findings" not in conclusion:
                 conclusion["main_findings"] = result.get(
                     "findings",
-                    result.get("key_findings", conclusion.get("main_findings", []))
+                    result.get("key_findings", conclusion.get("main_findings", [])),
                 )
 
             # Normalize limitation field names
@@ -468,11 +663,10 @@ Requirements:
             # Normalize method field names
             method.setdefault(
                 "research_method",
-                method.get("technique", method.get("methodology", ""))
+                method.get("technique", method.get("methodology", "")),
             )
             method.setdefault(
-                "approach_type",
-                method.get("method_type", method.get("approach", ""))
+                "approach_type", method.get("method_type", method.get("approach", ""))
             )
             method.setdefault("data_sources", method.get("data_source", ""))
 
@@ -504,28 +698,47 @@ Requirements:
 # Storage (JSONL - memory efficient)
 # =============================================================================
 
-def save_papers_jsonl(papers: list, output_dir: str):
+
+def save_papers_jsonl(papers: list, output_dir: str, embeddings: dict = None):
     """
     Save papers to JSONL format (one JSON object per line).
 
     This is memory-efficient compared to JSON array - papers are streamed
     to disk and can be processed incrementally without loading all into memory.
+
+    Also saves embeddings.json for semantic search if embeddings provided.
     """
     os.makedirs(output_dir, exist_ok=True)
     jsonl_path = f"{output_dir}/papers.jsonl"
 
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for paper in papers:
-            # Don't save full_text to JSONL - it's too large
             paper_copy = {k: v for k, v in paper.items() if k != "full_text"}
             f.write(json.dumps(paper_copy, ensure_ascii=False) + "\n")
 
-    # Also save individual JSON files for each paper (useful for Obsidian)
     for paper in papers:
         bib_key = paper.get("bib_key", "unknown")
         paper_copy = {k: v for k, v in paper.items() if k != "full_text"}
         with open(f"{output_dir}/{bib_key}.json", "w", encoding="utf-8") as f:
             json.dump(paper_copy, f, ensure_ascii=False, indent=2)
+
+    if embeddings:
+        emb_path = f"{output_dir}/embeddings.json"
+        with open(emb_path, "w", encoding="utf-8") as f:
+            json.dump(embeddings, f, ensure_ascii=False)
+        debug(f"    Saved {len(embeddings)} embeddings to {emb_path}")
+
+
+def load_embeddings_jsonl(output_dir: str) -> dict:
+    """Load pre-computed embeddings from embeddings.json."""
+    emb_path = f"{output_dir}/embeddings.json"
+    if not os.path.exists(emb_path):
+        return {}
+    try:
+        with open(emb_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
 
 
 def load_papers_jsonl(output_dir: str) -> list:
@@ -563,6 +776,7 @@ def iter_papers_jsonl(output_dir: str):
 # Knowledge Graph Builder
 # =============================================================================
 
+
 def build_knowledge_graph(papers: list, output_dir: str) -> dict:
     """
     Build a knowledge graph from extracted papers.
@@ -593,45 +807,50 @@ def build_knowledge_graph(papers: list, output_dir: str) -> dict:
         method = paper.get("method", {})
         conclusion = paper.get("conclusion", {})
         limitation = paper.get("limitation", {})
+        reproducibility = paper.get("reproducibility", {})
 
         # Paper node
         paper_node_id = f"paper_{bib_key}"
-        kg_data["nodes"].append({
-            "id": paper_node_id,
-            "type": "paper",
-            "title": title,
-            "year": paper.get("year")
-        })
+        kg_data["nodes"].append(
+            {
+                "id": paper_node_id,
+                "type": "paper",
+                "title": title,
+                "year": paper.get("year"),
+            }
+        )
 
         # Author nodes
         for author in authors:
             if author:
                 author_id = get_node_id("author", author)
-                kg_data["edges"].append({
-                    "source": author_id,
-                    "target": paper_node_id,
-                    "relation": "authored"
-                })
+                kg_data["edges"].append(
+                    {
+                        "source": author_id,
+                        "target": paper_node_id,
+                        "relation": "authored",
+                    }
+                )
 
         # Method node
         method_type = method.get("approach_type", "")
         if method_type:
             method_id = get_node_id("method", method_type)
-            kg_data["edges"].append({
-                "source": paper_node_id,
-                "target": method_id,
-                "relation": "uses_method"
-            })
+            kg_data["edges"].append(
+                {
+                    "source": paper_node_id,
+                    "target": method_id,
+                    "relation": "uses_method",
+                }
+            )
 
             # Research method detail
             research_method = method.get("research_method", "")
             if research_method and research_method != method_type:
                 rm_id = get_node_id("technique", research_method[:50])
-                kg_data["edges"].append({
-                    "source": method_id,
-                    "target": rm_id,
-                    "relation": "has_technique"
-                })
+                kg_data["edges"].append(
+                    {"source": method_id, "target": rm_id, "relation": "has_technique"}
+                )
 
         # Bioinformatics-specific nodes
         bioinfo = method.get("bioinformatics", {})
@@ -639,39 +858,49 @@ def build_knowledge_graph(papers: list, output_dir: str) -> dict:
             seq_platform = bioinfo.get("sequencing_platform", "")
             if seq_platform and seq_platform != "not applicable":
                 platform_id = get_node_id("platform", seq_platform)
-                kg_data["edges"].append({
-                    "source": paper_node_id,
-                    "target": platform_id,
-                    "relation": "uses_platform"
-                })
+                kg_data["edges"].append(
+                    {
+                        "source": paper_node_id,
+                        "target": platform_id,
+                        "relation": "uses_platform",
+                    }
+                )
 
         # Finding nodes
         for i, finding in enumerate(conclusion.get("main_findings", [])[:5]):
             finding_id = f"finding_{bib_key}_{i}"
-            kg_data["nodes"].append({
-                "id": finding_id,
-                "type": "finding",
-                "content": finding[:200]  # Truncate for KG
-            })
-            kg_data["edges"].append({
-                "source": paper_node_id,
-                "target": finding_id,
-                "relation": "has_finding"
-            })
+            kg_data["nodes"].append(
+                {
+                    "id": finding_id,
+                    "type": "finding",
+                    "content": finding[:200],  # Truncate for KG
+                }
+            )
+            kg_data["edges"].append(
+                {
+                    "source": paper_node_id,
+                    "target": finding_id,
+                    "relation": "has_finding",
+                }
+            )
 
         # Limitation nodes
         for i, limitation_text in enumerate(limitation.get("limitations", [])[:3]):
             limitation_id = f"limitation_{bib_key}_{i}"
-            kg_data["nodes"].append({
-                "id": limitation_id,
-                "type": "limitation",
-                "content": limitation_text[:200]
-            })
-            kg_data["edges"].append({
-                "source": paper_node_id,
-                "target": limitation_id,
-                "relation": "has_limitation"
-            })
+            kg_data["nodes"].append(
+                {
+                    "id": limitation_id,
+                    "type": "limitation",
+                    "content": limitation_text[:200],
+                }
+            )
+            kg_data["edges"].append(
+                {
+                    "source": paper_node_id,
+                    "target": limitation_id,
+                    "relation": "has_limitation",
+                }
+            )
 
         # Generate Obsidian note for this paper
         md_content = f"""# {title}
@@ -709,7 +938,7 @@ def build_knowledge_graph(papers: list, output_dir: str) -> dict:
 - **Public Dataset**: {reproducibility.get("public_dataset", "Not available")}
 
 ## Extracted
-{_format_bioinfo(paper.get("extracted_at", ""))}
+Extracted: {paper.get("extracted_at", "Unknown")}
 """
 
         with open(f"{obsidian_dir}/{bib_key}.md", "w", encoding="utf-8") as f:
@@ -746,7 +975,9 @@ def _format_bioinfo(bioinfo: dict) -> str:
     if bioinfo.get("database_versions"):
         lines.append(f"  - **Databases**: {', '.join(bioinfo['database_versions'])}")
     if bioinfo.get("code_available") is not None:
-        lines.append(f"  - **Code Available**: {'Yes' if bioinfo['code_available'] else 'No'}")
+        lines.append(
+            f"  - **Code Available**: {'Yes' if bioinfo['code_available'] else 'No'}"
+        )
     if bioinfo.get("data_availability"):
         lines.append(f"  - **Data**: {bioinfo['data_availability']}")
 
@@ -801,27 +1032,32 @@ def _add_comparison_edges(kg_data: dict, papers: list):
                 found_kw2_b = any(kw2.lower() in str(f).lower() for f in findings_b)
 
                 if (found_kw1_a and found_kw2_b) or (found_kw2_a and found_kw1_b):
-                    kg_data["edges"].append({
-                        "source": paper_a_id,
-                        "target": paper_b_id,
-                        "relation": "contradicts"
-                    })
+                    kg_data["edges"].append(
+                        {
+                            "source": paper_a_id,
+                            "target": paper_b_id,
+                            "relation": "contradicts",
+                        }
+                    )
                     added_edges.add(edge_key)
                     break
             else:
                 # If no contradiction found but both papers have findings, mark as related
                 if findings_a and findings_b:
-                    kg_data["edges"].append({
-                        "source": paper_a_id,
-                        "target": paper_b_id,
-                        "relation": "related"
-                    })
+                    kg_data["edges"].append(
+                        {
+                            "source": paper_a_id,
+                            "target": paper_b_id,
+                            "relation": "related",
+                        }
+                    )
                     added_edges.add(edge_key)
 
 
 # =============================================================================
 # CLI Commands
 # =============================================================================
+
 
 @click.group()
 @click.version_option(version=VERSION, prog_name="sci-literature")
@@ -870,11 +1106,64 @@ def extract(folder: str, output: str, workers: int):
 
     log(f"\nSuccessfully extracted {len(papers)} papers")
 
-    # Save as JSONL (memory-efficient)
-    save_papers_jsonl(papers, output)
+    emb_cfg = get_embedding_config(config)
+    embeddings = {}
+
+    if emb_cfg.get("enabled"):
+        log(f"\nComputing embeddings for {len(papers)} papers...")
+        for paper in tqdm(papers, desc="Embedding", unit="paper", dynamic_ncols=IS_TTY):
+            bib_key = paper.get("bib_key", "")
+            if bib_key:
+                emb = compute_paper_embedding(
+                    config, paper, emb_cfg.get("max_chars", 2000)
+                )
+                if emb:
+                    embeddings[bib_key] = emb
+        log(f"  Computed {len(embeddings)} embeddings")
+    else:
+        log(
+            f"\n  Embedding disabled (set embedding.enabled=true in config.yaml to enable)"
+        )
+
+    save_papers_jsonl(papers, output, embeddings)
 
     log(f"\nData saved to: {output}/papers.jsonl")
     log(f"Individual papers: {output}/<bib_key>.json")
+    if embeddings:
+        log(f"Embeddings saved to: {output}/embeddings.json")
+
+
+@cli.command()
+@click.option("--output", "-o", default="./extracted", help="Output directory")
+def compute_embeddings(output: str):
+    """Recompute embeddings for already-extracted papers."""
+    config = load_config()
+    papers_file = f"{output}/papers.jsonl"
+
+    if not os.path.exists(papers_file):
+        log(f"No data found. Run extract first")
+        return
+
+    emb_cfg = get_embedding_config(config)
+    if not emb_cfg.get("enabled"):
+        log(f"Embedding disabled (set embedding.enabled=true in config.yaml)")
+        return
+
+    papers = load_papers_jsonl(output)
+    log(f"Computing embeddings for {len(papers)} papers...")
+
+    embeddings = {}
+    for paper in tqdm(papers, desc="Embedding", unit="paper", dynamic_ncols=IS_TTY):
+        bib_key = paper.get("bib_key", "")
+        if bib_key:
+            emb = compute_paper_embedding(config, paper, emb_cfg.get("max_chars", 2000))
+            if emb:
+                embeddings[bib_key] = emb
+
+    emb_path = f"{output}/embeddings.json"
+    with open(emb_path, "w", encoding="utf-8") as f:
+        json.dump(embeddings, f, ensure_ascii=False)
+    log(f"\nSaved {len(embeddings)} embeddings to {emb_path}")
 
 
 @cli.command()
@@ -910,7 +1199,7 @@ def compare(output: str):
             f"[{bib}] {json.dumps(limitation.get('limitations', []), ensure_ascii=False)}"
         )
 
-        method_str = method.get("research_method", method.get("approach_type", ''))
+        method_str = method.get("research_method", method.get("approach_type", ""))
         methods.append(f"[{bib}] {method_str}")
 
         # Track bioinformatics details
@@ -999,9 +1288,11 @@ def build_kg(output: str):
 @cli.command()
 @click.argument("question")
 @click.option("--output", "-o", default="./extracted", help="Output directory")
-@click.option("--top-k", "-k", default=10, help="Number of papers to consider")
+@click.option(
+    "--top-k", "-k", default=10, help="Number of most relevant papers to retrieve"
+)
 def ask(question: str, output: str, top_k: int):
-    """Answer questions based on literature using RAG."""
+    """Answer questions based on literature using embedding-based RAG search."""
     config = load_config()
     papers_file = f"{output}/papers.jsonl"
 
@@ -1009,26 +1300,56 @@ def ask(question: str, output: str, top_k: int):
         log(f"No data found. Run extract first")
         return
 
-    log(f"Searching through papers for answer...")
+    emb_cfg = get_embedding_config(config)
+    embeddings = load_embeddings_jsonl(output)
 
-    # Stream papers and build context
+    if emb_cfg.get("enabled") and embeddings:
+        log(f"Using embedding-based semantic search...")
+        question_embedding = call_embedding_api(config, [question])
+        if not question_embedding:
+            log(f"    Embedding failed, falling back to sequential retrieval")
+            top_papers = list(iter_papers_jsonl(output))[:top_k]
+        else:
+            papers = load_papers_jsonl(output)
+            scored = []
+            for paper in papers:
+                bib_key = paper.get("bib_key", "")
+                emb = embeddings.get(bib_key)
+                if emb:
+                    sim = cosine_similarity(question_embedding[0], emb)
+                    scored.append((sim, paper))
+                else:
+                    debug(f"    No embedding for {bib_key}, skipping")
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_papers = [p for _, p in scored[:top_k]]
+
+            log(
+                f"  Retrieved {len(top_papers)} most relevant papers by semantic similarity"
+            )
+            for i, p in enumerate(top_papers, 1):
+                score = scored[i - 1][0] if i <= len(scored) else 0
+                log(
+                    f"    {i}. [{p.get('bib_key', '?')}] {p.get('title', '?')[:60]}... (sim={score:.3f})"
+                )
+    else:
+        if emb_cfg.get("enabled") and not embeddings:
+            log(f"  Embedding enabled but no embeddings.json found.")
+            log(f"  Run 'extract' or 'all' command first to compute embeddings.")
+        log(f"  Using sequential (non-embedding) retrieval...")
+        top_papers = list(iter_papers_jsonl(output))[:top_k]
+
     rag_context = ""
-    paper_count = 0
-
-    for paper in iter_papers_jsonl(output):
-        if paper_count >= top_k:
-            break
-
+    for i, paper in enumerate(top_papers, 1):
         rag_context += f"""
 ---
-Paper {paper_count + 1}: {paper.get("title", "")}
+Paper {i}: {paper.get("title", "")}
 Authors: {", ".join(paper.get("authors", [])[:3])}
 Year: {paper.get("year", "Unknown")}
 Method: {json.dumps(paper.get("method", {}), ensure_ascii=False)}
 Findings: {json.dumps(paper.get("conclusion", {}), ensure_ascii=False)}
 Limitations: {json.dumps(paper.get("limitation", {}), ensure_ascii=False)}
 ---"""
-        paper_count += 1
 
     prompt = f"""You are a senior biomedical researcher. Answer the question based on the provided literature.
 
@@ -1054,7 +1375,9 @@ Requirements:
     os.makedirs(output, exist_ok=True)
     answer_file = f"{output}/ask_{int(time.time())}.md"
     with open(answer_file, "w", encoding="utf-8") as f:
-        f.write(f"# Q&A Result\n\n**Question**: {question}\n\n**Answer**:\n{answer}\n\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        f.write(
+            f"# Q&A Result\n\n**Question**: {question}\n\n**Answer**:\n{answer}\n\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
+        )
     log(f"\nAnswer saved to: {answer_file}")
 
 
@@ -1100,7 +1423,22 @@ def all(folder: str, output: str, workers: int):
         pbar.close()
 
     log(f"\nSuccessfully extracted {len(papers)} papers")
-    save_papers_jsonl(papers, output)
+
+    emb_cfg = get_embedding_config(config)
+    embeddings = {}
+    if emb_cfg.get("enabled"):
+        log(f"\nComputing embeddings for {len(papers)} papers...")
+        for paper in tqdm(papers, desc="Embedding", unit="paper", dynamic_ncols=IS_TTY):
+            bib_key = paper.get("bib_key", "")
+            if bib_key:
+                emb = compute_paper_embedding(
+                    config, paper, emb_cfg.get("max_chars", 2000)
+                )
+                if emb:
+                    embeddings[bib_key] = emb
+        log(f"  Computed {len(embeddings)} embeddings")
+
+    save_papers_jsonl(papers, output, embeddings)
 
     # Step 2: Compare
     log(f"\n[2/3] Generating comparative analysis...")

@@ -80,11 +80,14 @@ openclaw hooks enable sci-literature  # Optional hook
 ### CLI Commands
 
 ```bash
-# Full pipeline
+# Full pipeline (extract + compare + KG + embeddings)
 python scripts/tool.py all --folder ./pdfs --output ./results
 
-# Extract only
+# Extract only (also computes embeddings if enabled)
 python scripts/tool.py extract --folder ./pdfs --output ./results
+
+# Recompute embeddings for already-extracted papers
+python scripts/tool.py compute-embeddings --output ./results
 
 # Compare analysis
 python scripts/tool.py compare --output ./results
@@ -92,7 +95,7 @@ python scripts/tool.py compare --output ./results
 # Knowledge graph
 python scripts/tool.py build-kg --output ./results
 
-# RAG Q&A
+# RAG Q&A (embedding-based semantic search)
 python scripts/tool.py ask "研究空白有哪些？" --output ./results
 ```
 
@@ -116,13 +119,15 @@ python scripts/tool.py ask "研究空白有哪些？" --output ./results
 ## Pipeline
 
 ```
-PDFs → extract → papers.jsonl (streamed, one line per paper)
-                    ↓
-          compare → compare_report.md
-                    ↓
-          build-kg → knowledge_graph.json + obsidian_notes/*.md
-                    ↓
-             ask → Q&A with [bib_key] citations
+PDFs → extract → papers.jsonl + embeddings.json
+                        ↓
+              compare → compare_report.md
+                        ↓
+              build-kg → knowledge_graph.json + obsidian_notes/*.md
+                        ↓
+           compute-embeddings → embeddings.json (optional, done automatically by extract/all)
+                        ↓
+                  ask → Q&A with [bib_key] citations (embedding-based retrieval)
 ```
 
 ## Citation Standards
@@ -146,6 +151,13 @@ api:
   api_key: "YOUR_API_KEY"
   model: "MiniMax-M2.7-highspeed"
   base_url: "https://api.minimaxi.com/v1"
+
+embedding:
+  enabled: true            # Set to false to disable semantic search
+  provider: "minimax"     # minimax | zhipu | deepseek | tongyi | moonshot | openai
+  model: "embo-01"        # Provider-specific embedding model
+  base_url: ""            # Uses api.base_url if empty
+  max_chars: 2000          # Max chars per paper for embedding
 ```
 
 ## Project Structure

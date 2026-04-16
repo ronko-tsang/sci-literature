@@ -102,11 +102,14 @@ After installation, the skill auto-loads when you ask literature-related questio
 ### Tool Commands
 
 ```bash
-# Extract from PDFs
+# Extract from PDFs (also computes embeddings automatically)
 python scripts/tool.py extract --folder ./pdfs --output ./results
 
 # Full pipeline
 python scripts/tool.py all --folder ./pdfs --output ./results
+
+# Compute/Recompute embeddings for already-extracted papers
+python scripts/tool.py compute-embeddings --output ./results
 
 # Compare papers
 python scripts/tool.py compare --output ./results
@@ -114,7 +117,7 @@ python scripts/tool.py compare --output ./results
 # Build knowledge graph
 python scripts/tool.py build-kg --output ./results
 
-# Ask questions
+# Ask questions (embedding-based semantic search)
 python scripts/tool.py ask "研究空白有哪些？" --output ./results
 ```
 
