@@ -1,0 +1,48 @@
+# SCI Literature Toolkit Configuration
+# Copy this file to config.yaml and fill in your API key
+
+# API Configuration
+api:
+  # API provider: minimax | zhipu | deepseek | tongyi | moonshot
+  # Recommended: minimax for CN users (fast, cost-effective)
+  provider: "minimax"
+
+  # API Key (get from respective platform)
+  # MiniMax: https://platform.minimaxi.com/
+  # Zhipu: https://open.bigmodel.cn/
+  # Tongyi: https://dashscope.aliyuncs.com/
+  # DeepSeek: https://platform.deepseek.com/
+  # Moonshot: https://platform.moonshot.cn/
+  api_key: "YOUR_API_KEY_HERE"
+
+  # Model name (defaults per provider)
+  # MiniMax: MiniMax-M2.7-highspeed | MiniMax-M2.7 | MiniMax-M2.5-highspeed
+  # Zhipu: glm-4-plus | glm-4
+  # Tongyi: qwen-max | qwen-plus
+  # DeepSeek: deepseek-chat | deepseek-coder
+  # Moonshot: moonshot-v1-128k | moonshot-v1-32k
+  model: "MiniMax-M2.7-highspeed"
+
+  # API endpoint (usually no need to change)
+  # MiniMax OpenAI-compatible: https://api.minimaxi.com/v1
+  # Zhipu: https://open.bigmodel.cn/api/paas/v4/
+  # Tongyi: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # DeepSeek: https://api.deepseek.com/v1
+  # Moonshot: https://api.moonshot.cn/v1
+  base_url: "https://api.minimaxi.com/v1"
+
+# Processing Configuration
+processing:
+  # Parallel workers (macOS: keep at 1-2 due to GIL)
+  max_workers: 2
+
+  # Max text length to send to LLM (chars)
+  max_text_chars: 8000
+
+  # Delay between API calls (seconds) to avoid rate limiting
+  api_delay: 1.0
+
+# Storage Configuration
+storage:
+  # Output directory for extracted data
+  extracted_dir: "./extracted"

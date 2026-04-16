@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Data
+chroma_data/
+extracted/
+my_pdfs/
+*.pdf
+
+# Config (user-specific)
+config.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+nohup.out
+
+# Literature outputs
+papers.jsonl
+compare_report.md
+knowledge_graph.json
+obsidian_notes/
+
+# OpenClaw workspace (user-specific)
+.openclaw/
+.learnings/
+
+# Temporary
+temp_analysis.md
+*.tmp

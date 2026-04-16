@@ -1,0 +1,11 @@
+{
+  "ownerId": "ronko",
+  "slug": "sci-literature",
+  "version": "1.0.0",
+  "publishedAt": 1744650600000,
+  "name": "sci-literature",
+  "description": "Deep-read SCI biomedical literature — citation tracing, evidence audit, knowledge graph, cross-paper synthesis. Master the 12 literature review skills for rigorous academic research.",
+  "user-invocable": true,
+  "author": "Ronko",
+  "homepage": "https://github.com/ronko-tsang/sci-literature"
+}
