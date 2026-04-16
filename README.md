@@ -31,10 +31,30 @@ cd sci-literature
 bash setup.sh
 ```
 
-### For Claude Code / OpenCode
+### For Claude Code
 
 ```bash
 cp -r sci-literature ~/.claude/skills/sci-literature
+```
+
+### For OpenCode
+
+OpenCode supports `~/.claude/skills/` for Claude compatibility:
+
+```bash
+cp -r sci-literature ~/.claude/skills/sci-literature
+```
+
+Or use the OpenCode skills CLI (recommended):
+
+```bash
+npx skills add ronko-tsang/sci-literature -y
+```
+
+Or install manually to OpenCode's own path:
+
+```bash
+cp -r sci-literature ~/.config/opencode/skill/sci-literature
 ```
 
 ### For OpenClaw

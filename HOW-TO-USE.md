@@ -1,16 +1,47 @@
 # How to Use Sci-Literature
 
-## For Claude Code / OpenCode
+## For Claude Code
 
 ### Installation
 
 ```bash
-# Copy skill to skills directory
 cp -r sci-literature ~/.claude/skills/sci-literature
-
-# Or create symlink
-ln -s /path/to/sci-literature ~/.claude/skills/sci-literature
 ```
+
+---
+
+## For OpenCode
+
+### Installation
+
+OpenCode also supports `~/.claude/skills/` for Claude compatibility:
+
+```bash
+cp -r sci-literature ~/.claude/skills/sci-literature
+```
+
+Or use the OpenCode skills CLI (recommended):
+
+```bash
+npx skills add ronko-tsang/sci-literature -y
+```
+
+Or install manually to OpenCode's own global path:
+
+```bash
+cp -r sci-literature ~/.config/opencode/skill/sci-literature
+```
+
+Project-level installation (only affects current project):
+
+```bash
+mkdir -p .opencode/skill/sci-literature
+cp sci-literature/SKILL.md .opencode/skill/sci-literature/
+```
+
+---
+
+## For OpenClaw
 
 ### Usage
 
